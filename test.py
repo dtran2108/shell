@@ -1,15 +1,22 @@
 #!/usr/bin/env python3
 from os import chdir, environ, getcwd, path
 from subprocess import run
+from history import history, handle_command, handle_special_case
 
 
 '''
-pwd     : print working directory
-cd      : change directory
-printenv: print all or part of environment
-export  : mark each name to be passed to child processes in the environment
-unset   : remove each variable or function name
-exit    : end process
+pwd             print working directory
+cd              change directory
+printenv        print all or part of environment
+export          mark each name to be passed to child processes in the
+                environment
+unset           remove each variable or function name
+exit            end process
+history         many programs  read input from the user a line at a time. The
+                GNU History library is able to keep track of those lines,
+                associate arbitrary data with each line, and utilize
+                information from previous lines in composing new ones.
+
 '''
 
 
@@ -92,6 +99,7 @@ def sh_exit(exit_args):
 
 
 def run_file(file_args):
+    cmd_not_found = False
     check = False
     if './' in file_args[0]:
         try:
@@ -114,6 +122,8 @@ def run_file(file_args):
                 break
         if not check:  # if the command didn't run
             print("intek-sh: " + file_args[0] + ": command not found")
+            cmd_not_found = True
+    return cmd_not_found
 
 
 def pwd(_):
@@ -128,8 +138,7 @@ def process_function(functions, command, arg):
         return True
 
 
-def handle_input():
-    _args = input('intek-sh$ ')
+def handle_input(_args):
     _args = _args.split(' ')
     type_in = []
     for element in _args:
@@ -139,7 +148,8 @@ def handle_input():
 
 
 def main():
-    global type_in
+    cmd_not_found = False
+    special_cases = ['! ', '!', '!=']
     flag = True
     functions = {
             'pwd': pwd,
@@ -147,16 +157,35 @@ def main():
             'printenv': printenv,
             'export': export,
             'unset': unset,
-            'exit': sh_exit
+            'exit': sh_exit,
+            'history': history,
             }
+    history_lst = []
     while flag:
-        type_in = handle_input()
+        _args = input('\033[92m\033[1mintek-sh$\033[0m ')
+        # expand history_lst
+        if not _args.startswith('!') and _args not in special_cases:
+            history_lst.append(_args)
+        # get args and check existence
+        args, exist = handle_command(_args, history_lst)
+        # when to continue or pass
+        continue_flag, pass_flag, args = handle_special_case(exist, args)
+        if continue_flag:
+            continue
+        elif pass_flag:
+            pass
+
+        type_in = handle_input(args)
         if type_in:
-            command = type_in[0]
-            if command in functions.keys():
-                flag = process_function(functions, command, type_in)
+            if type_in[0] in functions.keys():
+                if 'history' in type_in[0]:
+                    flag = process_function(functions, type_in[0], history_lst)
+                else:
+                    flag = process_function(functions, type_in[0], type_in)
             else:
-                run_file(type_in)
+                cmd_not_found = run_file(type_in)
+        if cmd_not_found and _args.startswith('!'):
+            history_lst.append(_args)
 
 
 if __name__ == '__main__':
