@@ -160,18 +160,23 @@ def main():
             'exit': sh_exit,
             'history': history,
             }
-    history_lst = []
+    history_file_to_read = open('.intek-sh_history', 'r')
+    history_lst = history_file_to_read.readlines()
     while flag:
         _args = input('\033[92m\033[1mintek-sh$\033[0m ')
         # expand history_lst
         if not _args.startswith('!') and _args not in special_cases:
             if '!#' not in _args:
-                history_lst.append(_args)
+                history_file = open('.intek-sh_history', 'a')
+                history_file.write(_args + '\n')
+                history_file.close()
+                # history_lst.append(_args)
         # get args and check existence
         args, exist, hashtag_flag = handle_command(_args, history_lst)
         # when to continue or pass
         continue_flag, pass_flag, args = handle_special_case(exist, args)
         if continue_flag:
+            print('continue')
             continue
         elif pass_flag:
             pass
@@ -186,10 +191,14 @@ def main():
             else:
                 cmd_not_found = run_file(type_in)
         if cmd_not_found and _args.startswith('!'):
-            history_lst.append(_args)
+            history_file = open('.intek-sh_history', 'a')
+            history_file.write(_args + '\n')
+            history_file.close()
         if hashtag_flag:
-            history_lst.append(args)
-
+            history_file = open('.intek-sh_history', 'a')
+            history_file.write(_args + '\n')
+            history_file.close()
+        history_file_to_read.close()
 
 if __name__ == '__main__':
     try:
