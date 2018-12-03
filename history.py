@@ -58,34 +58,49 @@ def handle_special_case(exist, args):
             elif len(args) > 2:
                 args = args[2:]
                 pass_flag = True
+    # elif bad_specifier:
+    #     continue_flag = True
     return continue_flag, pass_flag, args
 
 
 # replace args as cmd and print it
 def print_args(args, cmd):
     args = cmd
+    # if not bad_specifier:
     print(args)
     return args, True
 
 
 def handle_exclamation_n_hashtag(arg, index, args_lst):
+    global bad_specifier
+    bad_specifier = False
     if arg == '!#':
         alternative = args_lst[:index]
         args_lst.pop(index)
         for i, element in enumerate(alternative):
             args_lst.insert(index + i, element)
+    elif arg[:3] == '!#:' and arg[3:].isdigit():
+        pos = int(arg[3:])
+        alternative = args_lst[:index]
+        args_lst.pop(index)
+        try:
+            args_lst.insert(index, alternative[pos])
+        except IndexError:
+            print('intek-sh: ' + arg[2:] + ': bad word specifier')
+            bad_specifier = True
     return args_lst
 
 
 def handle_command(args, history_lst):
     exist = False
+    hashtag = False
     if args.startswith('!'):
         if len(args) is 1 or args[1] is ' ' or args[1] is '=':
-            return args, True
+            return args, True, hashtag, continue_flag
         elif args[1] is '(':
-            return args[0], exist
+            return args[0], exist, hashtag, continue_flag
         elif args[1] is '#':
-            return args, True
+            return args, True, hashtag, continue_flag
 
         # command type: '!?'
         elif args[1:].startswith('?'):
@@ -138,16 +153,18 @@ def handle_command(args, history_lst):
                         args, exist = print_args(args, ' '.join(args_lst))
                         break
             else:
+                print(2)
                 for cmd in reversed(history_lst):
                     if cmd.startswith(args):
                         args, exist = print_args(args, cmd)
                         break
     else:  # command type: '!#'
         if '!#' in args:
+            hashtag = True
             args_lst = args.split(' ')
             for index, arg in enumerate(args_lst):
                 if '!#' in arg:
                     args_lst = handle_exclamation_n_hashtag(arg, index,
                                                             args_lst)
             args, exist = print_args(args, ' '.join(args_lst))
-    return args, exist
+    return args, exist, hashtag
