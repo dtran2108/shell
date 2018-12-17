@@ -1,10 +1,24 @@
 #!/usr/bin/env python3
-from os import chdir, environ, getcwd, path
-from subprocess import run
+from history import write_history_file, read_history_file, print_history
+from history import handle_command, handle_special_case, expand_history_file
+from dynamic import make_subcommand_completer
+from readline import parse_and_bind, set_completer, set_completer_delims
+from os import environ, listdir, path
+from signal import signal, SIGINT, SIGTERM, SIGQUIT, SIG_IGN, SIGTSTP
+from sys import exit
+from input_excuting import input_excuting
+from pipe import handle_pipe
+from logical_operator import handle_logical_operator
+from command_substitution import command_substitution
+from builtins_package.process_cd import cd
+from builtins_package.process_exit import sh_exit
+from builtins_package.process_export import export
+from builtins_package.process_printenv import printenv
+from builtins_package.process_run_file import run_file
+from builtins_package.process_unset import unset
 
 
 '''
-pwd     : print working directory
 cd      : change directory
 printenv: print all or part of environment
 export  : mark each name to be passed to child processes in the environment
@@ -13,154 +27,129 @@ exit    : end process
 '''
 
 
-# check if args is more than 1
-def check_args(args):
-    if len(args) is not 1:
-        return True
+def handle_interrupt(signum, frame):
+    ''' KeyboardInterrupt's exit_code: 130'''
+    global exit_code
+    exit_code = 130
+    raise KeyboardInterrupt
+
+
+def get_args(curpath, _args):
+    if path.exists(curpath + '/.intek-sh_history'):
+        history_lst = read_history_file(curpath)
     else:
-        return False
+        print('intek-sh: there\'s nothing in the history list!')
+        raise FileNotFoundError
+    args, exist = handle_command(_args, history_lst)
+    return args, exist
 
 
-# change the path and set environ PWD as the path
-def change_dir(dir_path):
-    chdir(dir_path)
-    environ['PWD'] = getcwd()
-
-
-def cd(cd_args):
-    _path = None
-    # if args is more than 1 -> path is the last argument
-    if check_args(cd_args):
-        _path = cd_args[1]
-    if _path:
-        if _path is '..':
-            change_dir('..')
-        elif _path is '~':
-            if 'HOME' in environ:
-                change_dir(environ['HOME'])
-            else:
-                change_dir(environ['XAUTHORITY'].strip('.Xauthority'))
-        else:
+def get_all_cmds():
+    if 'PATH' in environ.keys():
+        for cmd_path in environ['PATH'].split(':'):
             try:
-                change_dir(path.abspath(_path))
+                cmds = listdir(cmd_path)
             except FileNotFoundError:
-                print('intek-sh: cd: ' + _path + ': No such file or directory')
-    else:  # if len path is 1 -> jump to HOME
-        if 'HOME' in environ:
-            change_dir(environ['HOME'])
-        else:
-            print('intek-sh: cd: HOME not set')
-
-
-def printenv(printenv_args):
-    # if len type_in is 1 -> print all the environment
-    if not check_args(printenv_args):
-        for key in environ.keys():
-            print(key + '=' + environ[key])
-    else:  # print the value of the key(printenv_args[1])
-        if printenv_args[1] in environ.keys():
-            print(environ[printenv_args[1]])
-
-
-def export(export_args):
-    if check_args(export_args):
-        variables = export_args[1:]
-        for variable in variables:
-            if '=' not in variable:
-                environ[variable] = ''
-            else:
-                variable = variable.split('=')
-                environ[variable[0]] = variable[1]
-
-
-def unset(unset_args):
-    if check_args(unset_args):
-        variables = unset_args[1:]
-        for variable in variables:
-            if variable in environ.keys():
-                del environ[variable]
-
-
-def sh_exit(exit_args):
-    if check_args(exit_args):
-        if exit_args[1].isdigit():
-            print('exit ' + ' '.join(type_in[1:]))
-        else:
-            print('exit\nintek-sh: exit: ' + ' '.join(type_in[1:]))
-    else:
-        print('exit')
-
-
-def run_file(file_args):
-    check = False
-    if './' in file_args[0]:
-        try:
-            run(file_args[0])
-        except PermissionError:
-            print('intek-sh: ' + file_args[0] + ': Permission denied')
-        except FileNotFoundError:
-            print("intek-sh: " + file_args[0] + ": No such file or directory")
-    else:
-        try:
-            # find all the possible paths
-            PATH = environ['PATH'].split(':')
-        except KeyError as e:
-            print("intek-sh: " + file_args[0] + ": command not found")
-            return e
-        for item in PATH:
-            if path.exists(item+'/'+file_args[0]):
-                run([item+'/'+file_args.pop(0)]+file_args)
-                check = True
-                break
-        if not check:  # if the command didn't run
-            print("intek-sh: " + file_args[0] + ": command not found")
-
-
-def pwd(_):
-    print(environ['PWD'])
-
-
-def process_function(functions, command, arg):
-    functions[command](arg)
-    if 'exit' in command:
-        return False
-    else:
-        return True
-
-
-def handle_input():
-    _args = input('intek-sh$ ')
-    _args = _args.split(' ')
-    type_in = []
-    for element in _args:
-        if element:
-            type_in.append(element)
-    return type_in
+                continue
+            for cmd in cmds:
+                commands.add(cmd)
 
 
 def main():
     global type_in
+    global exit_code
+    global commands
     flag = True
+    curpath = environ['PWD']
+    special_cases = ['! ', '!', '!=']
+    commands = {'history', 'cd', 'printenv', 'export', 'unset', 'exit'}
+    history_lst = []
     functions = {
-            'pwd': pwd,
             'cd': cd,
             'printenv': printenv,
             'export': export,
             'unset': unset,
-            'exit': sh_exit
+            'exit': sh_exit,
+            'history': '_'
             }
-    while flag:
-        type_in = handle_input()
-        if type_in:
-            command = type_in[0]
-            if command in functions.keys():
-                flag = process_function(functions, command, type_in)
+    try:
+        while flag:
+            '''make some color'''
+            shell_name = '\033[92m\033[1mintek-sh:\033[0m'
+            if 'HOME' in environ.keys():
+                home = '\033[1m\033[34m' +\
+                      environ['PWD'].replace(environ['HOME'], '~') + '\033[0m'
             else:
-                run_file(type_in)
+                home = '\033[1m\033[34m' + environ['PWD'] + '\033[0m'
+
+            ''' Ctrl + C '''
+            signal(SIGINT, handle_interrupt)
+
+            ''' Ctrl + "\" '''
+            signal(SIGQUIT, SIG_IGN)
+
+            ''' the signal that is sent by default by the kill, pkill,
+            killall, fuser -k... commands'''
+            signal(SIGTERM, SIG_IGN)
+
+            ''' Ctrl + Z '''
+            signal(SIGTSTP, SIG_IGN)
+
+            # get all the command in environment PATH
+            get_all_cmds()
+
+            parse_and_bind('tab: complete')
+            set_completer(make_subcommand_completer(commands))
+            set_completer_delims(" \t")
+
+            hist_written = False
+            _args = input(shell_name + home + '$ ')
+
+            # expand history_file
+            history_lst = read_history_file(curpath)
+            hist_written = expand_history_file(_args, special_cases, curpath,
+                                               history_lst)
+
+            # get args and check existence of _args in history_lst
+            args, exist = get_args(curpath, _args)
+            # if there is no command typed in so far
+            if not args and not exist:
+                print('intek-sh: there\'s nothing in the history list')
+                continue
+            # check if the after args in history_lst
+            if not hist_written:
+                history_lst = read_history_file(curpath)
+                hist_written = expand_history_file(_args, special_cases,
+                                                   curpath, history_lst)
+
+            # when to continue
+            continue_flag, args = handle_special_case(exist, args)
+            if continue_flag:
+                continue
+            if "&&" in args or "||" in args:
+                flag, exit_code = handle_logical_operator(args, functions)
+            elif ">" in args or "<" in args or "|" in args:
+                if "||" in args:
+                    pass
+                else:
+                    handle_pipe(args)
+            elif "`" in args:
+                command_substitution(args, functions)
+            else:
+                flag, exit_code = input_excuting(args, functions, curpath,
+                                                 exit_code)
+
+    except KeyboardInterrupt:
+        print('^C')
+        main()
+    except EOFError:
+        print()
+        exit(0)
 
 
 if __name__ == '__main__':
     try:
         main()
-    except EOFError:
-        pass
+    except NameError:
+        exit_code = 0
+        main()
